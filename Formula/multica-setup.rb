@@ -3,8 +3,8 @@ class MulticaSetup < Formula
 
   desc "Declarative workspace resource synchronization for Multica"
   homepage "https://github.com/korioinc/multica-setup"
-  url "https://github.com/korioinc/multica-setup/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "b123aa5ed7deb3e167643fb3b9419a1f68e778ea745fb98be59421a719cf502c"
+  url "https://github.com/korioinc/multica-setup/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "d1bc0d445544728f90606a26c8ac148bb10aca206d0f166246cbfa7262eb1998"
 
   depends_on "python@3.14"
 
