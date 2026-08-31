@@ -6,11 +6,13 @@ This is the official Homebrew tap for
 ## Install
 
 ```bash
+brew install multica-ai/tap/multica
 brew install korioinc/tap/multica-setup
 ```
 
-The formula installs the `multica-setup` command and its required
-[`multica`](https://github.com/multica-ai/multica) CLI dependency.
+Install both formulae by their fully qualified names so Homebrew grants trust
+only to the required items. The `multica-setup` formula keeps the
+[`multica`](https://github.com/multica-ai/multica) CLI as a managed dependency.
 
 ## Upgrade
 
