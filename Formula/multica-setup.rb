@@ -6,7 +6,6 @@ class MulticaSetup < Formula
   url "https://github.com/korioinc/multica-setup/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "b123aa5ed7deb3e167643fb3b9419a1f68e778ea745fb98be59421a719cf502c"
 
-  depends_on "multica-ai/tap/multica"
   depends_on "python@3.14"
 
   def install

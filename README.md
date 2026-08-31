@@ -6,13 +6,8 @@ This is the official Homebrew tap for
 ## Install
 
 ```bash
-brew install multica-ai/tap/multica
 brew install korioinc/tap/multica-setup
 ```
-
-Install both formulae by their fully qualified names so Homebrew grants trust
-only to the required items. The `multica-setup` formula keeps the
-[`multica`](https://github.com/multica-ai/multica) CLI as a managed dependency.
 
 ## Upgrade
 
@@ -33,14 +28,11 @@ cross-repository token is required.
 Maintainers can run the same workflow immediately after publishing a release:
 
 ```bash
-gh workflow run update-formula.yml \
-  --repo korioinc/homebrew-tap \
-  --field version=0.1.0 \
-  --field tag=v0.1.0
+gh workflow run update-formula.yml --repo korioinc/homebrew-tap
 ```
 
-Leave both inputs empty to use the latest published GitHub release. Source
-releases must publish the Git tag before this workflow runs.
+This uses the latest published GitHub release. Source releases must publish the
+Git tag before this workflow runs.
 
 Pull requests and pushes to `main` are checked by Homebrew's `test-bot` on
 macOS and Linux.

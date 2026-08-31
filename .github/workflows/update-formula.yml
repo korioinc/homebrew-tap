@@ -93,12 +93,6 @@ jobs:
           git fetch origin main
           git checkout --force -B main origin/main
 
-      - name: Trust Multica dependency
-        if: steps.release.outputs.available == 'true'
-        run: |
-          brew tap multica-ai/tap
-          brew trust --formula multica-ai/tap/multica
-
       - name: Download and verify source archive
         id: source
         if: steps.release.outputs.available == 'true'
@@ -216,7 +210,6 @@ jobs:
             url "{archive_url}"
             sha256 "{archive_sha256}"
 
-            depends_on "multica-ai/tap/multica"
             depends_on "python@3.14"
 
             def install
