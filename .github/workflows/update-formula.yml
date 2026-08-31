@@ -1,0 +1,254 @@
+name: Update formula
+
+on:
+  schedule:
+    - cron: '37 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released semantic version without the v prefix (optional)
+        required: false
+        type: string
+      tag:
+        description: Published Git tag, for example v0.1.0 (optional)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: update-multica-setup-formula
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  update:
+    if: github.repository == 'korioinc/homebrew-tap'
+    runs-on: macos-26
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+      REQUESTED_TAG: ${{ inputs.tag }}
+      SOURCE_REPOSITORY: korioinc/multica-setup
+    steps:
+      - name: Resolve release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -n "$REQUESTED_VERSION" || -n "$REQUESTED_TAG" ]]; then
+            if [[ -z "$REQUESTED_VERSION" || -z "$REQUESTED_TAG" ]]; then
+              echo "error: version and tag must be provided together" >&2
+              exit 1
+            fi
+            version="$REQUESTED_VERSION"
+            tag="$REQUESTED_TAG"
+          else
+            tag=$(gh api "repos/$SOURCE_REPOSITORY/releases?per_page=100" \
+              --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // ""')
+            if [[ -z "$tag" ]]; then
+              echo "No published release is available yet."
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            version="${tag#v}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: version must be a stable semantic version (x.y.z)" >&2
+            exit 1
+          fi
+
+          if [[ "$tag" != "v$version" ]]; then
+            echo "error: tag must equal v$version" >&2
+            exit 1
+          fi
+
+          source_url="https://github.com/$SOURCE_REPOSITORY.git"
+          if ! git ls-remote --exit-code --refs "$source_url" "refs/tags/$tag" >/dev/null; then
+            echo "error: published tag $tag does not exist in $SOURCE_REPOSITORY" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "available=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Homebrew
+        id: set-up-homebrew
+        if: steps.release.outputs.available == 'true'
+        uses: Homebrew/actions/setup-homebrew@a657b8b0cd35d0f65cce41fce9b24cf054b49869 # 2026.08.24.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pin update base to main
+        if: steps.release.outputs.available == 'true'
+        run: |
+          git fetch origin main
+          git checkout --force -B main origin/main
+
+      - name: Download and verify source archive
+        id: source
+        if: steps.release.outputs.available == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          archive_url="https://github.com/$SOURCE_REPOSITORY/archive/refs/tags/$TAG.tar.gz"
+          archive_path="$RUNNER_TEMP/multica-setup-$VERSION.tar.gz"
+
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output "$archive_path" "$archive_url"
+
+          package_version=$(python3 - "$archive_path" <<'PY'
+          import ast
+          import pathlib
+          import sys
+          import tarfile
+
+          with tarfile.open(sys.argv[1], mode="r:gz") as archive:
+              candidates = [
+                  member
+                  for member in archive.getmembers()
+                  if member.isfile()
+                  and pathlib.PurePosixPath(member.name).parts[-2:]
+                  == ("multica_setup", "__init__.py")
+              ]
+              if len(candidates) != 1:
+                  raise SystemExit(
+                      "error: release archive must contain exactly one package version file"
+                  )
+              package_file = archive.extractfile(candidates[0])
+              if package_file is None:
+                  raise SystemExit("error: package version file could not be read")
+              source = package_file.read().decode("utf-8")
+
+          tree = ast.parse(source)
+          for node in tree.body:
+              if not isinstance(node, ast.Assign):
+                  continue
+              if any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets):
+                  value = ast.literal_eval(node.value)
+                  if isinstance(value, str):
+                      print(value)
+                      break
+          else:
+              raise SystemExit("error: __version__ is missing from the release archive")
+          PY
+          )
+
+          if [[ "$package_version" != "$VERSION" ]]; then
+            echo "error: tag version $VERSION does not match package version $package_version" >&2
+            exit 1
+          fi
+
+          sha256=$(shasum -a 256 "$archive_path" | awk '{print $1}')
+          {
+            echo "archive_url=$archive_url"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Refuse unsafe version replacement
+        if: steps.release.outputs.available == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          ARCHIVE_SHA256: ${{ steps.source.outputs.sha256 }}
+        run: |
+          formula="Formula/multica-setup.rb"
+          if [[ ! -f "$formula" ]]; then
+            exit 0
+          fi
+
+          current_tag=$(sed -nE \
+            's#^  url ".*/tags/(v[0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"$#\1#p' "$formula")
+          current_version="${current_tag#v}"
+          current_sha256=$(awk -F'"' '/^  sha256 / { print $2; exit }' "$formula")
+          if [[ -z "$current_version" || -z "$current_sha256" ]]; then
+            echo "error: existing formula version or SHA-256 could not be read" >&2
+            exit 1
+          fi
+
+          if [[ "$VERSION" == "$current_version" ]]; then
+            if [[ "$ARCHIVE_SHA256" != "$current_sha256" ]]; then
+              echo "error: refusing to replace $VERSION with a different archive SHA-256" >&2
+              exit 1
+            fi
+            echo "Formula already contains $VERSION with the expected SHA-256."
+            exit 0
+          fi
+
+          newest=$(printf '%s\n%s\n' "$current_version" "$VERSION" | sort -V | tail -n 1)
+          if [[ "$newest" != "$VERSION" ]]; then
+            echo "error: refusing formula downgrade from $current_version to $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Render formula
+        if: steps.release.outputs.available == 'true'
+        env:
+          ARCHIVE_URL: ${{ steps.source.outputs.archive_url }}
+          ARCHIVE_SHA256: ${{ steps.source.outputs.sha256 }}
+        run: |
+          mkdir -p Formula
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          archive_url = os.environ["ARCHIVE_URL"]
+          archive_sha256 = os.environ["ARCHIVE_SHA256"]
+          formula = f'''class MulticaSetup < Formula
+            include Language::Python::Virtualenv
+
+            desc "Declarative workspace resource synchronization for Multica"
+            homepage "https://github.com/korioinc/multica-setup"
+            url "{archive_url}"
+            sha256 "{archive_sha256}"
+
+            depends_on "multica-ai/tap/multica"
+            depends_on "python@3.14"
+
+            def install
+              virtualenv_install_with_resources
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{{bin}}/multica-setup --version")
+            end
+          end
+          '''
+          pathlib.Path("Formula/multica-setup.rb").write_text(formula, encoding="utf-8")
+          PY
+
+      - name: Validate formula
+        if: steps.release.outputs.available == 'true'
+        env:
+          TAP_NAME: ${{ steps.set-up-homebrew.outputs.tap-name }}
+        run: |
+          brew style Formula/multica-setup.rb
+          brew audit --strict --online "$TAP_NAME/multica-setup"
+          brew install --build-from-source "$TAP_NAME/multica-setup"
+          brew test "$TAP_NAME/multica-setup"
+
+      - name: Commit formula update
+        if: steps.release.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git add Formula/multica-setup.rb
+          if git diff --cached --quiet; then
+            echo "Formula is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "multica-setup $VERSION"
+          git push origin HEAD:main
+          gh workflow run tests.yml --ref main
