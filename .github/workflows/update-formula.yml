@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Released semantic version without the v prefix (optional)
+        description: Published stable semantic version tag, for example 0.1.2 (optional)
         required: false
         type: string
       tag:
-        description: Published Git tag, for example v0.1.0 (optional)
+        description: Published Git tag matching version exactly, for example 0.1.2 (optional)
         required: false
         type: string
 
@@ -55,16 +55,16 @@ jobs:
               echo "available=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            version="${tag#v}"
+            version="$tag"
           fi
 
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "error: version must be a stable semantic version (x.y.z)" >&2
             exit 1
           fi
 
-          if [[ "$tag" != "v$version" ]]; then
-            echo "error: tag must equal v$version" >&2
+          if [[ "$tag" != "$version" ]]; then
+            echo "error: tag must equal version exactly and must not use a v prefix" >&2
             exit 1
           fi
 
@@ -166,7 +166,7 @@ jobs:
           fi
 
           current_tag=$(sed -nE \
-            's#^  url ".*/tags/(v[0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"$#\1#p' "$formula")
+            's#^  url ".*/tags/(v?[0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz"$#\1#p' "$formula")
           current_version="${current_tag#v}"
           current_sha256=$(awk -F'"' '/^  sha256 / { print $2; exit }' "$formula")
           if [[ -z "$current_version" || -z "$current_sha256" ]]; then

@@ -32,7 +32,8 @@ gh workflow run update-formula.yml --repo korioinc/homebrew-tap
 ```
 
 This uses the latest published GitHub release. Source releases must publish the
-Git tag before this workflow runs.
+Git tag before this workflow runs. Release tags use stable semantic versions
+without a `v` prefix, such as `0.1.2`.
 
 Pull requests and pushes to `main` are checked by Homebrew's `test-bot` on
 macOS and Linux.
